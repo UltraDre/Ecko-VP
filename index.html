@@ -189,7 +189,7 @@
           </div>
           <div class="empty-actions">
             <button class="btn btn-primary" id="btnEmptyLocal" type="button"><svg aria-hidden="true"><use href="#i-folder"/></svg>Open local file</button>
-            <button class="btn btn-ghost" id="btnEmptySearch" type="button"><svg aria-hidden="true"><use href="#i-search"/></svg>Search movies</button>
+            <button class="btn btn-ghost" id="btnEmptySearch" type="button"><svg aria-hidden="true"><use href="#i-search"/></svg>Search movies &amp; series</button>
             <button class="btn btn-ghost" id="btnEmptyAnime" type="button"><svg aria-hidden="true"><use href="#i-search"/></svg>Search anime</button>
           </div>
           <p class="empty-hint">Supports MP4 · WebM · M4V · MOV · OGG · MP3 · M4A · MKV (codec dependent) · HLS <code>.m3u8</code> · DASH <code>.mpd</code></p>
@@ -414,16 +414,16 @@
         </form>
       </dialog>
 
-      <!-- ---------- Movie search (public-domain / openly licensed sources) ---------- -->
+      <!-- ---------- Movie & series search (public-domain / openly licensed sources) ---------- -->
       <dialog class="dialog movie-search" id="movieSearchDialog" aria-labelledby="movieSearchHeading">
         <form id="movieSearchForm" autocomplete="off">
           <div class="dialog-head">
-            <h2 id="movieSearchHeading">Search movies to stream</h2>
-            <button class="icon-btn sm" type="button" id="btnMovieSearchClose" aria-label="Close movie search"><svg aria-hidden="true"><use href="#i-close"/></svg></button>
+            <h2 id="movieSearchHeading">Search movies &amp; series to stream</h2>
+            <button class="icon-btn sm" type="button" id="btnMovieSearchClose" aria-label="Close movie and series search"><svg aria-hidden="true"><use href="#i-close"/></svg></button>
           </div>
 
           <div class="dialog-body movie-search-body">
-            <p class="movie-search-note">Search several catalogues of openly licensed video at once — Internet Archive, Wikimedia Commons and the federated PeerTube network — for movies, series episodes and shorts offered as a direct video file or stream. Only records that declare a public-domain or Creative Commons license are listed; the claims come from uploaders and are not independently verified, so open the record to check the rights. This does not search paid streaming services or the whole web. Your query is sent to the selected catalogues.</p>
+            <p class="movie-search-note">Search several catalogues of openly licensed video at once — Internet Archive, Wikimedia Commons and the federated PeerTube network — for movies <em>and</em> series, offered as a direct video file or stream. Series are gathered into one result with their episodes listed, so a boxed-set upload or one item per episode both show up as the whole show and can be queued episode by episode or in one click. Only records that declare a public-domain or Creative Commons license are listed; the claims come from uploaders and are not independently verified, so open the record to check the rights. This does not search paid streaming services or the whole web. Your query is sent to the selected catalogues.</p>
             <div class="search-row">
               <input class="input" type="search" id="movieSearchQuery" placeholder="Enter a movie or series name" aria-label="Movie or series name to search for" />
               <button class="btn btn-primary" type="submit" id="btnMovieSearchGo"><svg aria-hidden="true"><use href="#i-search"/></svg><span>Search</span></button>
@@ -431,9 +431,11 @@
             <div class="search-row movie-search-filter">
               <label for="movieSearchSource">Catalogue</label>
               <select class="input" id="movieSearchSource" aria-label="Catalogue to search"></select>
+              <label for="movieSearchKind">Show</label>
+              <select class="input" id="movieSearchKind" aria-label="Which kinds of title to show"></select>
             </div>
-            <p class="search-status" id="movieSearchStatus" role="status" aria-live="polite">Enter a title to search public-domain and Creative Commons video files.</p>
-            <ul class="movie-results" id="movieSearchResults" aria-label="Movie search results"></ul>
+            <p class="search-status" id="movieSearchStatus" role="status" aria-live="polite">Enter a title to search public-domain and Creative Commons movies and series.</p>
+            <ul class="movie-results" id="movieSearchResults" aria-label="Movie and series search results"></ul>
           </div>
 
           <div class="dialog-actions">
@@ -513,13 +515,13 @@
             </button>
           </div>
         </form>
-        <button class="btn btn-ghost movie-search-button" id="btnSearchMovies" type="button" title="Search public-domain and Creative Commons movies on Internet Archive">
-          <svg aria-hidden="true"><use href="#i-search"/></svg><span>Search movies</span>
+        <button class="btn btn-ghost movie-search-button" id="btnSearchMovies" type="button" title="Search public-domain and Creative Commons movies and series to stream directly">
+          <svg aria-hidden="true"><use href="#i-search"/></svg><span>Search movies &amp; series</span>
         </button>
         <button class="btn btn-ghost anime-search-button" id="btnSearchAnime" type="button" title="Search anime series, episodes and movies to stream directly">
           <svg aria-hidden="true"><use href="#i-search"/></svg><span>Search anime</span>
         </button>
-        <p class="card-hint">Paste a direct file/stream URL, or a regular webpage (pressing Play scans it for media links). Use <strong>Search anime</strong> or <strong>Search movies</strong> to find direct video files, series and streams.</p>
+        <p class="card-hint">Paste a direct file/stream URL, or a regular webpage (pressing Play scans it for media links). Use <strong>Search anime</strong> or <strong>Search movies &amp; series</strong> to find direct video files, series and streams.</p>
       </section>
 
       <section class="card" id="cardLocal">

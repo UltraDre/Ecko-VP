@@ -639,19 +639,306 @@ window.fetch = async (url) => {
 $('#movieSearchForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 await wait(100);
 const archiveSearchUrl = new URL(movieSearchCalls.find((url) => url.includes('advancedsearch.php')));
-check('movie search queries licensed Internet Archive movie titles', /mediatype:movies/.test(archiveSearchUrl.searchParams.get('q'))
-  && /licenseurl:\*/.test(archiveSearchUrl.searchParams.get('q')) && /title:/.test(archiveSearchUrl.searchParams.get('q')),
+check('movie search queries licensed Internet Archive movie and series records',
+  /mediatype:\(movies OR podcast\)/.test(archiveSearchUrl.searchParams.get('q'))
+  && /licenseurl:\*/.test(archiveSearchUrl.searchParams.get('q')) && /title:"[^"]+"/.test(archiveSearchUrl.searchParams.get('q')),
   archiveSearchUrl.searchParams.get('q'));
 check('only a record with a declared CC/public-domain license is shown', document.querySelectorAll('#movieSearchResults .movie-result').length === 1,
   String(document.querySelectorAll('#movieSearchResults .movie-result').length));
 check('movie result exposes its uploader-declared license', /Public domain/.test($('#movieSearchResults .license').textContent));
 check('movie result exposes a direct stream link', $('#movieSearchResults a[href^="https://archive.org/download/"]') !== null);
+check('a single-feature record is tagged as a movie', /^Movie$/.test($('#movieSearchResults .tag.kind').textContent),
+  $('#movieSearchResults .tag.kind').textContent);
 $('#movieSearchResults [data-action="queue"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 await wait(300);
 const movieQueue = JSON.parse(window.localStorage.getItem('nebula.playlist.v1')).items;
 check('queued movie uses the direct encoded Internet Archive video URL', movieQueue.some((item) =>
   item.title === 'Public Domain Sample' && item.url === 'https://archive.org/download/pd-sample/feature%20clip.mp4' && item.type === 'progressive'),
   JSON.stringify(movieQueue.map((item) => ({ title: item.title, url: item.url, type: item.type }))));
+
+/* Movies *and* series. Fixtures shaped like real catalogue records: an IA
+ * item's file list carries one entry per encode, so `iaRecord` builds the
+ * metadata reply and `iaHits` the search reply. */
+const iaHits = (docs) => ({ ok: true, json: async () => ({ response: { docs } }) });
+const iaRecord = (metadata, files) => ({ ok: true, json: async () => ({ metadata, files }) });
+const pdMark = 'http://creativecommons.org/publicdomain/mark/1.0/';
+const removeFrom = (index) => {
+  for (let i = document.querySelectorAll('#playlistList .item').length; i > index; i--) {
+    document.querySelectorAll('#playlistList .item')[index]?.querySelector('[data-action="remove"]')
+      ?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  }
+};
+const playlistBeforeSeries = document.querySelectorAll('#playlistList .item').length;
+window.fetch = async (url) => {
+  const requestUrl = String(url);
+  if (requestUrl.startsWith('https://archive.org/advancedsearch.php?')) {
+    return iaHits([
+      { identifier: 'boxed-set', title: 'Sample Show Season 1', year: '1984', mediatype: 'movies', licenseurl: pdMark },
+      { identifier: 'lone-feature', title: 'Quiet Feature', year: '1921', mediatype: 'movies', licenseurl: pdMark },
+      { identifier: 'odd-episode', title: 'Sample Show S01E05', year: '1984', mediatype: 'movies', licenseurl: pdMark },
+      { identifier: 'unlicensed-series', title: 'Unlicensed Series', mediatype: 'movies', licenseurl: '' },
+    ]);
+  }
+  if (requestUrl === 'https://archive.org/metadata/boxed-set') {
+    return iaRecord({ title: 'Sample Show Season 1', year: '1984', mediatype: 'movies', licenseurl: pdMark }, [
+      { name: 'S1E10.The Germans.mp4', size: '300', source: 'original' },
+      { name: 'S1E1.A Touch of Class.mp4', size: '100', source: 'original' },
+      { name: 'S1E1.A Touch of Class.ogv', size: '90', source: 'derivative', original: 'S1E1.A Touch of Class.mp4' },
+      { name: 'S1E2.The Builders.mp4', size: '200', source: 'original' },
+      { name: 'S1E2.The Builders_512kb.mp4', size: '60', source: 'derivative', original: 'S1E2.The Builders.mp4' },
+      { name: 'SampleShow.thumbs/S1E1.A Touch of Class_000138.jpg', size: '7', source: 'derivative' },
+      { name: 'S1E2.The Builders.asr.srt', size: '9', source: 'derivative' },
+    ]);
+  }
+  if (requestUrl === 'https://archive.org/metadata/lone-feature') {
+    return iaRecord({ title: 'Quiet Feature', year: '1921', mediatype: 'movies', licenseurl: pdMark }, [
+      { name: 'quiet_feature.mp4', size: '600', source: 'original' },
+      { name: 'quiet_feature.ogv', size: '413', source: 'derivative' },
+      { name: 'quiet_feature_512kb.mp4', size: '418', source: 'derivative' },
+      { name: 'quiet_feature.mp3', size: '69', source: 'derivative' },
+    ]);
+  }
+  if (requestUrl === 'https://archive.org/metadata/odd-episode') {
+    return iaRecord({ title: 'Sample Show S01E05', year: '1984', mediatype: 'movies', licenseurl: pdMark }, [
+      { name: 'Sample Show S01E05.mp4', size: '120', source: 'original' },
+    ]);
+  }
+  if (requestUrl === 'https://archive.org/metadata/unlicensed-series') {
+    return iaRecord({ title: 'Unlicensed Series', mediatype: 'movies' }, [{ name: 'ep1.mp4' }]);
+  }
+  return { ok: false, status: 404, json: async () => ({}) };
+};
+$('#movieSearchQuery').value = 'Sample Show';
+$('#movieSearchForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await wait(150);
+const seriesRows = [...document.querySelectorAll('#movieSearchResults .movie-result')];
+check('one row per record: the boxed set, a feature and a lone episode', seriesRows.length === 3, String(seriesRows.length));
+check('an unlicensed series record is still skipped', !/Unlicensed/.test($('#movieSearchResults').textContent),
+  $('#movieSearchResults').textContent.slice(0, 200));
+const seriesRow = seriesRows[0];
+check('a record holding several episodes is offered as a series', /Series . 3 episodes/.test(seriesRow.textContent),
+  seriesRow.textContent.slice(0, 160));
+check('derivative encodes collapse into the episode they render',
+  seriesRow.querySelectorAll('.movie-episode-item').length === 3, String(seriesRow.querySelectorAll('.movie-episode-item').length));
+check('episodes are ordered by number, not by the order the API listed the files',
+  [...seriesRow.querySelectorAll('.movie-episode-title')].map((n) => n.textContent).join(' | ')
+  === 'A Touch of Class | The Builders | The Germans',
+  [...seriesRow.querySelectorAll('.movie-episode-title')].map((n) => n.textContent).join(' | '));
+check('episode labels carry their S/E numbers', /S01E02/.test(seriesRow.textContent), seriesRow.textContent.slice(0, 240));
+check('a series result starts collapsed behind an episodes toggle',
+  seriesRow.querySelector('.movie-episodes-list').hidden === true
+  && seriesRow.querySelector('[data-action="toggle-episodes"]').getAttribute('aria-expanded') === 'false');
+seriesRow.querySelector('[data-action="toggle-episodes"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+check('the toggle reveals the episode list', seriesRow.querySelector('.movie-episodes-list').hidden === false
+  && seriesRow.querySelector('[data-action="toggle-episodes"]').getAttribute('aria-expanded') === 'true');
+check('a series plays its first episode, not the first file listed',
+  seriesRow.querySelector('a[href^="https://archive.org/download/boxed-set/"]').href
+  === 'https://archive.org/download/boxed-set/S1E1.A%20Touch%20of%20Class.mp4',
+  seriesRow.querySelector('a[href^="https://archive.org/download/boxed-set/"]').href);
+check('a lone file whose title numbers it is tagged as an episode',
+  /^Episode$/.test(seriesRows[2].querySelector('.tag.kind').textContent), seriesRows[2].querySelector('.tag.kind').textContent);
+check('a single-feature record is not mistaken for a series',
+  /^Movie$/.test(seriesRows[1].querySelector('.tag.kind').textContent)
+  && seriesRows[1].querySelector('.movie-episodes-wrap') === null, seriesRows[1].textContent.slice(0, 160));
+seriesRows[0].querySelector('[data-action="queue-all"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await wait(300);
+const seriesQueue = JSON.parse(window.localStorage.getItem('nebula.playlist.v1')).items;
+check('Queue all adds every episode in order',
+  seriesQueue.slice(-3).map((item) => item.title).join(' | ')
+  === 'Sample Show Season 1 — A Touch of Class | Sample Show Season 1 — The Builders | Sample Show Season 1 — The Germans',
+  JSON.stringify(seriesQueue.slice(-3).map((item) => item.title)));
+removeFrom(playlistBeforeSeries);
+await wait(300);
+check('the playlist is left as it was found',
+  document.querySelectorAll('#playlistList .item').length === playlistBeforeSeries,
+  String(document.querySelectorAll('#playlistList .item').length));
+
+// Real uploads carry rendition noise: an `.ia.mp4` twin or a resolution copy of
+// the same picture must not fake a series, while a two-disc movie offers parts.
+window.fetch = async (url) => {
+  const requestUrl = String(url);
+  if (requestUrl.startsWith('https://archive.org/advancedsearch.php?')) {
+    return iaHits([
+      { identifier: 'season-record', title: 'Boxed Season 1', year: '1975', mediatype: 'movies', licenseurl: pdMark },
+      { identifier: 'two-disc', title: 'Split Feature', year: '1931', mediatype: 'movies', licenseurl: pdMark },
+    ]);
+  }
+  if (requestUrl === 'https://archive.org/metadata/season-record') {
+    return iaRecord({ title: 'Boxed Season 1', mediatype: 'movies', licenseurl: pdMark }, [
+      { name: 'Boxed Season 1 (1080p).mp4', size: '5000', source: 'original' },
+      { name: 'Boxed Season 1.ia.mp4', size: '5000', source: 'derivative' },
+      { name: 'Boxed Season 1.mp4', size: '5000', source: 'original' },
+      { name: 'boxed-season-1.thumbs/Boxed Season 1_000001.jpg', size: '7', source: 'derivative' },
+      { name: '__ia_thumb.jpg', size: '7', source: 'derivative' },
+    ]);
+  }
+  if (requestUrl === 'https://archive.org/metadata/two-disc') {
+    return iaRecord({ title: 'Split Feature', mediatype: 'movies', licenseurl: pdMark }, [
+      { name: 'Split Feature Part 1.mp4', size: '1000', source: 'original' },
+      { name: 'Split Feature Part 2.mp4', size: '1000', source: 'original' },
+    ]);
+  }
+  return { ok: false, status: 404, json: async () => ({}) };
+};
+$('#movieSearchQuery').value = 'Boxed Season';
+$('#movieSearchForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await wait(150);
+const renditionRows = [...document.querySelectorAll('#movieSearchResults .movie-result')];
+check('renditions of one picture collapse into one result', renditionRows.length === 2, String(renditionRows.length));
+check('an .ia.mp4 twin does not turn a whole-season record into a series',
+  /^Movie$/.test(renditionRows[0].querySelector('.tag.kind').textContent)
+  && renditionRows[0].querySelector('.movie-episodes-wrap') === null, renditionRows[0].textContent.slice(0, 180));
+check('a two-disc movie stays a movie and offers both parts',
+  /^Movie . 2 parts$/.test(renditionRows[1].querySelector('.tag.kind').textContent)
+  && renditionRows[1].querySelectorAll('.movie-episode-item').length === 2, renditionRows[1].textContent.slice(0, 220));
+
+// A real boxed-set upload: one file per episode, plus an Ogg rendition of each
+// (26 files, no pointer between them). They must read as 13 ordered episodes.
+const fawlty = [
+  'S1E1.A Touch of Class', 'S1E2.The Builders', 'S1E3.The Wedding Party', 'S1E4.The Hotel Inspectors',
+  'S1E5.Gourmet Night', 'S1E6.The Germans', 'S2E1.Communication Problems', 'S2E2.The Psychiatrist',
+  'S2E3.Waldorf Salad', 'S2E4.The Kipper and the Corpse', 'S2E5.The Anniversary', 'S2E6.Basil the Rat',
+  'S2E7.A Bed for Betty',
+];
+window.fetch = async (url) => {
+  const requestUrl = String(url);
+  if (requestUrl.startsWith('https://archive.org/advancedsearch.php?')) {
+    return iaHits([{ identifier: 'FawltyTowers', title: 'Fawlty Towers Series', year: '1975',
+      mediatype: 'movies', creator: 'BBC', licenseurl: pdMark }]);
+  }
+  if (requestUrl === 'https://archive.org/metadata/FawltyTowers') {
+    return iaRecord({ title: 'Fawlty Towers Series', year: '1975', creator: 'BBC', mediatype: 'movies', licenseurl: pdMark },
+      fawlty.flatMap((name) => [
+        { name: `${name}.mp4`, size: '366894000', source: 'original', format: 'MPEG4', length: '1740' },
+        { name: `${name}.ogv`, size: '136894000', source: 'derivative', format: 'Ogg Video', length: '1740' },
+      ]));
+  }
+  return { ok: false, status: 404, json: async () => ({}) };
+};
+$('#movieSearchQuery').value = 'Fawlty Towers';
+$('#movieSearchForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await wait(150);
+const boxedRows = [...document.querySelectorAll('#movieSearchResults .movie-result')];
+check('a boxed-set record is one series result, not one row per file', boxedRows.length === 1, String(boxedRows.length));
+check('every episode of the record is offered', /Series . 13 episodes/.test(boxedRows[0].textContent),
+  boxedRows[0].querySelector('.tag.kind').textContent);
+check('each episode keeps its Ogg rendition out of the way',
+  boxedRows[0].querySelectorAll('.movie-episode-item').length === 13,
+  String(boxedRows[0].querySelectorAll('.movie-episode-item').length));
+check('episodes run in season order',
+  [...boxedRows[0].querySelectorAll('.movie-episode-title')].map((n) => n.textContent)[0] === 'A Touch of Class'
+  && [...boxedRows[0].querySelectorAll('.movie-episode-title')].map((n) => n.textContent).at(-1) === 'A Bed for Betty',
+  [...boxedRows[0].querySelectorAll('.movie-episode-title')].map((n) => n.textContent).join(' | '));
+check('the season/episode number of each file is shown',
+  /S02E06/.test(boxedRows[0].textContent), boxedRows[0].querySelector('.movie-episodes-list').textContent.slice(0, 200));
+boxedRows[0].querySelector('[data-action="queue-all"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await wait(300);
+const boxedQueue = JSON.parse(window.localStorage.getItem('nebula.playlist.v1')).items.slice(playlistBeforeSeries);
+check('queueing the season adds all 13 episodes at their direct file URLs',
+  boxedQueue.length === 13
+  && boxedQueue[0].url === 'https://archive.org/download/FawltyTowers/S1E1.A%20Touch%20of%20Class.mp4'
+  && boxedQueue.every((item) => /\.mp4$/.test(item.url)),
+  JSON.stringify(boxedQueue.slice(0, 2).map((item) => item.url)));
+removeFrom(playlistBeforeSeries);
+await wait(300);
+
+// A season bigger than the app lists: the row says so rather than pretending
+// the run ended where the list did.
+window.fetch = async (url) => {
+  const requestUrl = String(url);
+  if (requestUrl.startsWith('https://archive.org/advancedsearch.php?')) {
+    return iaHits([{ identifier: 'long-run', title: 'Long Running Show', mediatype: 'movies', licenseurl: pdMark }]);
+  }
+  if (requestUrl === 'https://archive.org/metadata/long-run') {
+    return iaRecord({ title: 'Long Running Show', mediatype: 'movies', licenseurl: pdMark },
+      Array.from({ length: 61 }, (_, i) => ({
+        name: `Long Running Show S01E${String(i + 1).padStart(2, '0')}.mp4`, size: '1000', source: 'original',
+      })));
+  }
+  return { ok: false, status: 404, json: async () => ({}) };
+};
+$('#movieSearchQuery').value = 'Long Running Show';
+$('#movieSearchForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await wait(150);
+const longRow = document.querySelector('#movieSearchResults .movie-result');
+check('a record longer than the list says how much of it is shown',
+  /Series . first 60 of 61 episodes/.test(longRow.querySelector('.tag.kind').textContent),
+  longRow.querySelector('.tag.kind').textContent);
+
+// Catalogues hold many series as one item per episode: those fold into one entry.
+window.fetch = async (url) => {
+  const requestUrl = String(url);
+  if (requestUrl.startsWith('https://archive.org/advancedsearch.php?')) {
+    return iaHits([
+      { identifier: 'tot-ice', title: 'Tales of Tomorrow - Ice from Space', mediatype: 'movies', licenseurl: pdMark },
+      { identifier: 'tot-window', title: 'Tales of Tomorrow - The Window', mediatype: 'movies', licenseurl: pdMark },
+      { identifier: 'tot-child', title: 'Tales of Tomorrow - A Child is Crying', mediatype: 'movies', licenseurl: pdMark },
+    ]);
+  }
+  const identifier = requestUrl.split('/metadata/')[1];
+  return iaRecord({ title: `Tales of Tomorrow - ${identifier}`, mediatype: 'movies', licenseurl: pdMark },
+    [{ name: `${identifier}.mp4`, size: '1000', source: 'original' }]);
+};
+$('#movieSearchQuery').value = 'Tales of Tomorrow';
+$('#movieSearchForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await wait(150);
+const foldedRows = [...document.querySelectorAll('#movieSearchResults .movie-result')];
+check('one item per episode is folded into one series result', foldedRows.length === 1, String(foldedRows.length));
+check('the folded series lists the episodes it gathered', /Series . 3 episodes/.test(foldedRows[0]?.textContent || ''),
+  foldedRows[0]?.textContent.slice(0, 200));
+const foldedLinks = [...foldedRows[0].querySelectorAll('.movie-episodes-list a[href^="https://archive.org/details/"]')].map((a) => a.getAttribute('href'));
+check('each folded episode links the record it came from',
+  foldedLinks.length === 3 && new Set(foldedLinks).size === 3, JSON.stringify(foldedLinks));
+foldedRows[0].querySelector('[data-action="queue-all"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await wait(300);
+const foldedQueue = JSON.parse(window.localStorage.getItem('nebula.playlist.v1')).items.slice(playlistBeforeSeries);
+check('queueing the folded series keeps each episode’s own file',
+  foldedQueue.length === 3 && new Set(foldedQueue.map((item) => item.url)).size === 3
+  && foldedQueue.every((item) => /^https:\/\/archive\.org\/download\/tot-/.test(item.url)),
+  JSON.stringify(foldedQueue.map((item) => item.url)));
+removeFrom(playlistBeforeSeries);
+await wait(300);
+
+// the Show picker filters the hits already in hand
+$('#movieSearchKind').value = 'movie';
+$('#movieSearchKind').dispatchEvent(new window.Event('change', { bubbles: true }));
+check('Show > Movies only hides the series results',
+  document.querySelectorAll('#movieSearchResults .movie-result').length === 0
+  && /No movie results/.test($('#movieSearchStatus').textContent), $('#movieSearchStatus').textContent);
+$('#movieSearchKind').value = 'series';
+$('#movieSearchKind').dispatchEvent(new window.Event('change', { bubbles: true }));
+check('Show > Series & episodes keeps the folded series',
+  document.querySelectorAll('#movieSearchResults .movie-result').length === 1
+  && /Filtered to 1 series/.test($('#movieSearchStatus').textContent), $('#movieSearchStatus').textContent);
+$('#movieSearchKind').value = 'all';
+$('#movieSearchKind').dispatchEvent(new window.Event('change', { bubbles: true }));
+check('Show > Movies & series shows every hit again',
+  document.querySelectorAll('#movieSearchResults .movie-result').length === 1
+  && !/Filtered to/.test($('#movieSearchStatus').textContent), $('#movieSearchStatus').textContent);
+check('the Show filter is remembered', 'movieSearchKind' in JSON.parse(window.localStorage.getItem('nebula.settings.v1')),
+  window.localStorage.getItem('nebula.settings.v1'));
+
+// The same episode offered by two records is one episode twice, not a series.
+window.fetch = async (url) => {
+  const requestUrl = String(url);
+  if (requestUrl.startsWith('https://archive.org/advancedsearch.php?')) {
+    return iaHits([
+      { identifier: 'dup-a', title: 'Repeat Show - The Sequel', mediatype: 'movies', licenseurl: pdMark },
+      { identifier: 'dup-b', title: 'Repeat Show - The Sequel', mediatype: 'movies', licenseurl: pdMark },
+    ]);
+  }
+  const identifier = requestUrl.split('/metadata/')[1];
+  return iaRecord({ title: `Repeat Show - The Sequel`, mediatype: 'movies', licenseurl: pdMark },
+    [{ name: `${identifier}.mp4`, size: '1000', source: 'original' }]);
+};
+$('#movieSearchQuery').value = 'Repeat Show';
+$('#movieSearchForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+await wait(150);
+const dupRows = [...document.querySelectorAll('#movieSearchResults .movie-result')];
+check('one episode listed by two records is not invented into a series', dupRows.length === 2
+  && dupRows.every((row) => /^Movie$/.test(row.querySelector('.tag.kind').textContent)),
+  dupRows.map((row) => row.querySelector('.tag.kind').textContent).join(' | '));
+
 $('#btnMovieSearchCancel').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
 // Multi-catalogue search: Commons + PeerTube rows carry their own source tag

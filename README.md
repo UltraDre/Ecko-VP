@@ -82,13 +82,18 @@ No frameworks, no build step, no bundler — open it from any static server and 
     and URLs embedded in the page's scripts) and every video found is added
     to the playlist
 - **Movie & series search**: look a title up in several catalogues of openly licensed video at once —
-  **Internet Archive** (public-domain / CC movie records), **Wikimedia Commons** (free media, direct
+  **Internet Archive** (public-domain / CC movie and TV records), **Wikimedia Commons** (free media, direct
   `upload.wikimedia.org` files) and the federated **PeerTube** network via SepiaSearch (resolved to the
-  instance's own MP4/HLS URL). The *Catalogue* picker narrows the search to a single source. Results can
-  be played or queued. Only records with an uploader-declared public-domain / Creative Commons licence and
-  a directly playable file are listed — this is not a search of commercial streaming services or the whole
-  web, and the licence claims come from uploaders, so open the record and verify the rights before
-  streaming.
+  instance's own MP4/HLS URL). The *Catalogue* picker narrows the search to a single source and *Show*
+  keeps either movies or series and episodes.
+  Series count as much as movies: a record holding a whole run lists every one of its episodes (one per
+  file, ordered by season/episode, with the duplicate encodes of a picture folded into the episode they
+  render), and a catalogue that stores one item per episode — *Tales of Tomorrow – Ice from Space*,
+  *… – The Window* — is gathered back into a single series result carrying its episodes. Play or queue a
+  single episode, or **Queue all** to add the whole run in order. Only records with an uploader-declared
+  public-domain / Creative Commons licence and a directly playable file are listed — this is not a search
+  of commercial streaming services or the whole web, and the licence claims come from uploaders, so open
+  the record and verify the rights before streaming.
 - **Anime search & direct streaming**: dedicated search across major open anime catalogues —
   **Internet Archive Anime Archives** (over 130,000+ anime titles, complete multi-episode series, films, and OVAs with direct MP4/video files),
   **Kitsu Anime DB** (comprehensive anime database with official synopsis, Japanese & English titles, ratings, episode counts, and trailer streams),
@@ -218,11 +223,13 @@ The file is split into numbered sections so you can jump straight to what you ne
 ### 1. Play an online video
 
 1. Paste a direct media URL into **Online video** and press **Play** (or **Queue** to add it without playing).
-2. To look up a movie, series or episode by name, choose **Search movies**, enter its title and press
-   **Play** on a result (or **Queue** it). The search runs against every catalogue selected in the
+2. To look up a movie, series or episode by name, choose **Search movies & series**, enter its title and
+   press **Play** on a result (or **Queue** it). The search runs against every catalogue selected in the
    **Catalogue** picker — Internet Archive, Wikimedia Commons and the federated PeerTube network — and
    only lists items with an uploader-declared public-domain/Creative Commons licence and a direct video
-   file or stream. It does **not** search the whole internet, commercial streaming services or paid
+   file or stream. Results are tagged **Movie**, **Episode** or **Series · N episodes**; *Show* narrows
+   them to one kind, and a series row expands into its episodes — each playable on its own, or **Queue
+   all** for the whole run. It does **not** search the whole internet, commercial streaming services or paid
    offers; licence labels are supplied by uploaders, so open the record and verify rights before
    streaming. Wikimedia Commons videos are usually WebM/Ogg (browser codec support varies) and PeerTube
    items are served from the hosting instance, so the first connection can take a moment.
@@ -582,8 +589,8 @@ These are inherent to a browser-based player (no backend, no DRM):
 | Playback stutters for 4K files | The browser decodes in software; try a lower resolution or close other tabs. |
 | Nothing is stored after a while | The browser evicted the cache (storage pressure). Grant persistent storage when prompted and keep free disk space. |
 | Subtitles do not appear | Enable them in the CC panel; check the file is a valid `.vtt`/`.srt` (SRT is converted automatically). |
-| Movie search finds nothing | The search covers Internet Archive, Wikimedia Commons and PeerTube — not commercial streaming services, torrent sites or the whole web. Try the title's original spelling (or just the series name), switch the *Catalogue* picker to *All catalogues*, or browse a record for alternative names. Only records with a declared Creative Commons/public-domain licence and a direct video file are shown — a title whose upload has no licence or no playable file is skipped on purpose. |
-| Movie search cannot connect | Check the connection and retry; the status line names which catalogue failed. The search reads the catalogues' public JSON APIs directly, so browser extensions, DNS filters or offline mode can block individual sources — the others still deliver results. |
+| Movie & series search finds nothing | The search covers Internet Archive, Wikimedia Commons and PeerTube — not commercial streaming services, torrent sites or the whole web. Try the title's original spelling (or just the series name), switch the *Catalogue* picker to *All catalogues* and *Show* to *Movies & series*, or browse a record for alternative names. Only records with a declared Creative Commons/public-domain licence and a direct video file are shown — a title whose upload has no licence or no playable file is skipped on purpose. A record that looks episodic is filed under *series*, so it is hidden while *Show* reads *Movies only*. |
+| Movie & series search cannot connect | Check the connection and retry; the status line names which catalogue failed. The search reads the catalogues' public JSON APIs directly, so browser extensions, DNS filters or offline mode can block individual sources — the others still deliver results. |
 | A search returns “PeerTube … could not be reached” | Some PeerTube instances are offline or block cross-origin reads. PeerTube rows need one extra request (the instance's API) to find the direct file; simply retry, or narrow the picker to another catalogue. |
 | Video starts again from the beginning instead of resuming | The video is shorter than 5 s, it was watched to the end (then starting over is intentional), it is a live stream, or the site data was cleared. A local file also has to be reconnected first (see below). |
 | The playlist is there but a local file will not play | Browsers never keep a local file open between visits, so the row comes back as **“saved — tap to reconnect”**. Click it (or the link icon) and pick the file or its folder again — rows are matched by name, size and modified date, so one pick can reconnect the whole queue. Renaming or re-encoding the file breaks the match; remove the row and add it again. |
@@ -599,7 +606,7 @@ These are inherent to a browser-based player (no backend, no DRM):
 - **Theme** — all colours live in the `:root` / `:root[data-theme="light"]` custom properties at the top
   of `styles.css` (`--accent`, `--accent-2`, surfaces, radii, spacing).
 - **Default settings** — edit the `Settings.data` defaults in `script.js` §02
-  (`prebufferWhilePaused`, `movieSearchSource`, …).
+  (`prebufferWhilePaused`, `movieSearchSource`, `movieSearchKind`, …).
 - **Buffer policy** — `StreamEngine.BUFFER_TARGETS` (see
   [Streaming libraries](#streaming-libraries-hlsjs--dashjs)).
 - **Speed presets** — the `speeds` array in `Menus.init()`.
@@ -627,8 +634,29 @@ The movie/series search is provider-based: every entry in `MovieSearch.sources` 
 }
 ```
 
-Push it into `MovieSearch.sources` and the picker, the status line and the source tags pick it up
-automatically. Follow the same licence rules as the built-in catalogues: only surface records with an
+A catalogue whose records bundle several playable files (the episodes of a box set, the discs of a long
+film) can list them, and the row then offers an episode picker with per-episode Play/Queue and
+**Queue all**:
+
+```js
+{
+  isSeries: true,                  // the files are an episode run, not parts of one film
+  episodeUnit: 'episode',          // 'episode' | 'part'
+  episodeCount: 13,
+  episodes: [{                       // the first is what the row's Play/Queue uses
+    title: 'A Touch of Class', label: 'S01E01', season: 1, episode: 1,
+    url: 'https://example.org/S1E1.mp4', type: 'progressive',
+    fileName: 'S1E1.mp4', fileSize: 0, duration: 0,
+    license: { url: '…', label: '…' }, detailsUrl: 'https://example.org/record/1',
+  }],
+}
+```
+
+Results returned without those fields are still classified by `MovieNet` — a title that reads as
+`Series – Episode` is grouped with its siblings into one series result, and `parseEpisode` tags the
+numbered ones, so movies and series are separated without a catalogue having to know about either.
+Push it into `MovieSearch.sources` and the picker, the status line, the kind tags and the source tags
+pick it up automatically. Follow the same licence rules as the built-in catalogues: only surface records with an
 uploader-declared public-domain/Creative Commons licence *and* a directly playable URL, use `credentials:
 'omit'` + `referrerPolicy: 'no-referrer'` for the requests (see `MovieNet`), and never scrape a watch
 page or bypass a paywall/DRM.
@@ -689,6 +717,8 @@ node tests/up-next.test.mjs           # press-and-hold 2x speed + the up-next ca
 - [hls.js](https://github.com/video-dev/hls.js) — HLS playback (Apache-2.0)
 - [dash.js](https://github.com/Dash-Industry-Forum/dash.js) — MPEG-DASH playback (BSD-3-Clause)
 - Movie/series search uses Internet Archive's public [Advanced Search](https://archive.org/developers/search.html)
+  (`mediatype:(movies OR podcast)`, which is where Internet Archive files all video — features, shorts and
+  television alike)
   and [Metadata](https://archive.org/developers/md-read.html) APIs, the
   [Wikimedia Commons MediaWiki API](https://commons.wikimedia.org/w/api.php) (direct files are served by
   [`upload.wikimedia.org`](https://upload.wikimedia.org)) and the
