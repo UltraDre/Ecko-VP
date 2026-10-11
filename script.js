@@ -230,6 +230,7 @@ const Settings = {
     upNextEnabled: true,    // offer the "up next" card before the current item ends
     upNextSeconds: 60,      // how many seconds before the end the card appears
     movieSearchSource: 'all',   // movie search catalogue: 'all' | provider id
+    movieSearchKind: 'all',     // movie search filter: 'all' | 'movie' | 'series'
     animeSearchSource: 'all',   // anime search catalogue: 'all' | provider id
     lastVolume: 1,
     subSearchLang: '',      // preferred language for the online subtitle search
@@ -5316,6 +5317,10 @@ const Sources = {
  * and a result looks like
  *   { source, sourceLabel, title, year, creator, license: { url, label },
  *     fileName, fileSize, duration, url, type, detailsUrl }
+ * A record that carries several episodes may add
+ *   { isSeries, episodeCount, episodes: [{ title, label, url, … }] }
+ * and one that does not is still folded into a series by the shared title
+ * prefix its episodes carry — the search answers for movies and series alike.
  * Only records that carry an uploader-declared public-domain / Creative
  * Commons licence and resolve to a directly playable file or stream are
  * returned, so the player never scrapes watch pages or paid services.
@@ -5351,6 +5356,81 @@ const MovieNet = {
       .slice(0, max);
   },
 
+  /* ---------- title parsing: what makes a hit an episode of a series? ---------- */
+
+  /** Episode markers in "Night Court S01E02 – …", "Episode 7", "Chapter 3", "disc 2". */
+  EPISODE_PATTERNS: [
+    { re: /\bs\s*(\d{1,2})\s*[._\- ]?\s*e\s*(\d{1,3})\b/i, season: 1, episode: 2, unit: 'episode' },
+    { re: /\b(\d{1,2})\s*[xX]\s*(\d{1,3})\b/, season: 1, episode: 2, unit: 'episode' },
+    { re: /\b(?:episode|episod[eio]|ep)\s*[._#-]?\s*(\d{1,3})\b/i, episode: 1, unit: 'episode' },
+    { re: /\b(?:part|pt|chapter|chap|volume|vol)\s*[._#-]?\s*(\d{1,3})\b/i, episode: 1, unit: 'part' },
+    { re: /\b(?:disc|disk|cd|dvd)\s*[._#-]?\s*(\d{1,2})\b/i, episode: 1, unit: 'part' },
+  ],
+
+  /**
+   * Parse season/episode numbers out of a title or file name.
+   * Returns `{ season, episode, unit }` (either number may be absent) or null.
+   */
+  parseEpisode(value) {
+    const text = String(value ?? '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!text) return null;
+    for (const pattern of this.EPISODE_PATTERNS) {
+      const found = text.match(pattern.re);
+      if (!found) continue;
+      const season = pattern.season ? Number(found[pattern.season]) : 0;
+      const episode = pattern.episode ? Number(found[pattern.episode]) : 0;
+      if (!episode && !season) continue;
+      return {
+        season: season > 0 && season < 100 ? season : 0,
+        episode: episode > 0 && episode < 1000 ? episode : 0,
+        unit: pattern.unit,
+        raw: found[0],
+      };
+    }
+    return null;
+  },
+
+  /**
+   * "Tales of Tomorrow - Ice from Space" is one episode of a series, so the
+   * part before the separator is the series name. Returns `{ series, rest }`
+   * when the title splits that way, else null (a bare movie title never does).
+   */
+  splitSeriesTitle(value) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    const found = text.match(/^(.{3,160}?)\s+(?:-|–|—|\||:)\s+(.{2,160}?)$/);
+    if (!found) return null;
+    const series = found[1].replace(/[\s,.-]+$/, '').trim();
+    const rest = found[2].trim();
+    if (series.length < 3 || !rest || series === rest) return null;
+    return { series, rest };
+  },
+
+  /** How one episode should be shown: a "S01E02" style label plus its title. */
+  episodeMarks(value) {
+    const full = this.cleanText(value, 160);
+    const marks = this.parseEpisode(full);
+    if (!marks) return { title: full, label: '', season: 0, episode: 0, unit: '' };
+    const number = marks.episode || marks.season;
+    return {
+      title: this.cleanText(full.replace(marks.raw, ' ').replace(/^[\s\-–—:,]+/, ''), 160),
+      label: marks.season && marks.episode
+        ? `S${String(marks.season).padStart(2, '0')}E${String(marks.episode).padStart(2, '0')}`
+        : `${marks.unit === 'part' ? 'Part' : 'Ep.'} ${number}`,
+      season: marks.season,
+      episode: number,
+      unit: marks.unit,
+    };
+  },
+
+  /** Comparison key for a series name — punctuation, case and years aside. */
+  seriesKey(value) {
+    return String(value ?? '')
+      .toLowerCase()
+      .replace(/\(?\b(19|20)\d{2}\b\)?/g, ' ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  },
+
   /** Run `worker(item)` over `items` with a concurrency cap, keeping the order. */
   async mapLimit(items, limit, worker) {
     const list = Array.isArray(items) ? items : [];
@@ -5377,6 +5457,7 @@ const ArchiveMovies = {
   METADATA_URL: 'https://archive.org/metadata/',
   MAX_LOOKUPS: 24,
   MAX_RESULTS: 10,
+  MAX_EPISODES: 60,           // files listed for one series record
   LOOKUP_CONCURRENCY: 4,
 
   /** Quote a title as one Lucene phrase before URLSearchParams encodes it. */
@@ -5386,7 +5467,10 @@ const ArchiveMovies = {
 
   searchUrl(query) {
     const params = new URLSearchParams();
-    params.set('q', `title:${this.quotePhrase(query)} AND mediatype:movies AND licenseurl:*`);
+    // `movies` is Internet Archive's bucket for *all* video — features, shorts
+    // and television — but episodic uploads are also filed under `podcast`, so
+    // both are searched for a title to keep series in the results.
+    params.set('q', `title:${this.quotePhrase(query)} AND mediatype:(movies OR podcast) AND licenseurl:*`);
     ['identifier', 'title', 'year', 'creator', 'licenseurl', 'mediatype'].forEach((field) => params.append('fl[]', field));
     params.set('rows', String(this.MAX_LOOKUPS));
     params.set('page', '1');
@@ -5412,11 +5496,19 @@ const ArchiveMovies = {
     };
   },
 
-  /** Choose a likely browser-playable video file, preferring MP4/WebM. */
-  videoFile(files) {
+  /**
+   * Every browser-playable video file of a record, one entry per *picture*.
+   *
+   * An IA item holds every derivative encode of the same footage side by side
+   * (`film.mp4`, `film.ogv`, `film_512kb.mp4`, `film.4.mp4`), so grouping by
+   * file name after the encoder noise is stripped keeps a single feature a
+   * single result — while the 26 files of a boxed-set upload stay 13 episodes.
+   * Derivatives point at their source through `original` and are folded in.
+   */
+  videoFiles(files) {
     const accepted = new Set(['mp4', 'm4v', 'mov', 'webm', 'ogv', 'ogg', 'mkv']);
     const priority = { mp4: 0, webm: 1, m4v: 2, mov: 3, ogv: 4, ogg: 5, mkv: 6 };
-    return (Array.isArray(files) ? files : Object.values(files || {}))
+    const list = (Array.isArray(files) ? files : Object.values(files || {}))
       .filter((file) => file && typeof file.name === 'string' && file.source !== 'metadata')
       .map((file) => {
         const name = file.name.trim();
@@ -5425,8 +5517,53 @@ const ArchiveMovies = {
       })
       .filter((file) => accepted.has(file.ext)
         && !file.name.startsWith('/')
-        && !file.name.split('/').some((part) => !part || part === '.' || part === '..'))
-      .sort((a, b) => priority[a.ext] - priority[b.ext])[0] || null;
+        && !/\.thumbs?\//i.test(file.name)
+        && !file.name.split('/').some((part) => !part || part === '.' || part === '..'));
+
+    const groups = new Map();
+    for (const file of list) {
+      const key = file.source === 'derivative' && typeof file.original === 'string' && file.original.trim()
+        ? this.encodeKey(file.original)
+        : this.encodeKey(file.name);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(file);
+    }
+
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    const videos = [];
+    for (const [key, group] of groups) {
+      group.sort((a, b) => (priority[a.ext] ?? 99) - (priority[b.ext] ?? 99));
+      const chosen = group[0];
+      videos.push({
+        key,
+        name: chosen.name,
+        ext: chosen.ext,
+        size: Number(chosen.size) || 0,
+        length: Number(chosen.length) || Number(chosen.duration) || 0,
+      });
+    }
+    videos.sort((a, b) => collator.compare(a.name, b.name));
+    const capped = videos.slice(0, this.MAX_EPISODES);
+    capped.total = videos.length;                 // how many the record really holds
+    return capped;
+  },
+
+  /** A file name reduced to what identifies its footage: "Film_512kb.mp4" → "film". */
+  encodeKey(name) {
+    const base = String(name).replace(/\\/g, '/').split('/').pop().replace(/\.[a-z0-9]+$/i, '');
+    let key = base;
+    let previous;
+    do {
+      previous = key;
+      key = key
+        .replace(/(?:\s|[._-])+(?:h\.?264|h\.?265|hevc|x264|x265|avc|mpeg-?\d*|mpg\d*|theora|vp\d|av1|aac|ac3|dts|mp3|ogv|ogg|webm|m4v|mp4|m4a|mkv|avi|ts)$/i, '')
+        .replace(/(?:\s|[._-])+(?:item_image|item_mhd|item_smh|item_livemhd|preview|sample|trailer|thumb|thumbs|asr|ia)$/i, '')
+        .replace(/\s*\(?\d{3,4}\s*p\)?$/i, '')
+        .replace(/(?:\s|[._-])+\d{2,4}\s*kb$/i, '')
+        .replace(/\s*\((?:hd|sd)\)$/i, '')
+        .replace(/(?:\s|[._-])+$/, '');
+    } while (key !== previous);
+    return (key || base).trim().toLowerCase();
   },
 
   directFileUrl(identifier, fileName) {
@@ -5434,24 +5571,72 @@ const ArchiveMovies = {
     return `https://archive.org/download/${encodeURIComponent(identifier)}/${path}`;
   },
 
+  /**
+   * Whether a record's playable files form an episode run ('episode') or are
+   * just chunks of one feature ('part'). Alternate encodes of the same picture
+   * are already collapsed, so two differently sized files of one film never
+   * look like a series here — and "Show 1 … Show 24" does.
+   */
+  episodeUnit(files) {
+    if (files.length < 2) return 'part';
+    const marks = files.map((file) => MovieNet.parseEpisode(file.name));
+    if (marks.every(Boolean)) return marks.some((mark) => mark.unit === 'episode') ? 'episode' : 'part';
+    if (files.length >= 3) {
+      const stems = new Set(files.map((file) => this.encodeKey(file.name).replace(/\s*\d+$/, '').trim()));
+      if (stems.size === 1) return 'episode';
+    }
+    return 'part';
+  },
+
+  /**
+   * Turn the record's playable files into episode entries (a movie gets one).
+   * Files that carry numbers are ordered by them, so "Play Ep 1" is episode 1
+   * rather than whatever the metadata API happened to list first.
+   */
+  episodeList(identifier, files) {
+    const entries = files.map((file, index) => {
+      const shown = MovieNet.episodeMarks(file.name.replace(/\\/g, '/').split('/').pop().replace(/\.[a-z0-9]+$/i, '').replace(/[._]+/g, ' '));
+      const url = this.directFileUrl(identifier, file.name);
+      return {
+        ...shown,
+        title: shown.title || `File ${index + 1}`,
+        fileName: file.name,
+        fileSize: file.size,
+        duration: file.length,
+        url,
+        type: detectType(url, 'progressive'),
+      };
+    });
+    const numbered = entries.every((entry) => entry.season || entry.episode);
+    if (numbered) entries.sort((a, b) => (a.season - b.season) || (a.episode - b.episode));
+    return entries;
+  },
+
   async resolveHit(hit, signal) {
     const identifier = String(hit?.identifier || '').trim();
     if (!/^[a-z0-9][a-z0-9._-]{0,199}$/i.test(identifier)) return null;
     const record = await MovieNet.fetchJson(`${this.METADATA_URL}${encodeURIComponent(identifier)}`, signal);
     const metadata = record?.metadata || {};
-    if (metadata.mediatype && String(metadata.mediatype).toLowerCase() !== 'movies') return null;
+    const mediatype = String(metadata.mediatype || hit.mediatype || '').toLowerCase();
+    // Internet Archive files every kind of video (features, shorts, television)
+    // under `movies`; episodic uploads also appear as `podcast`. Anything else
+    // has no playable video to offer.
+    if (mediatype && mediatype !== 'movies' && mediatype !== 'podcast') return null;
 
     const license = this.licenseInfo(metadata.licenseurl || hit.licenseurl);
     if (!license) return null;
-    const file = this.videoFile(record.files);
-    if (!file) return null;
+    const files = this.videoFiles(record.files);
+    if (!files.length) return null;
 
     const title = String(metadata.title || hit.title || identifier).trim().slice(0, 180) || identifier;
     const year = String(metadata.year || hit.year || '').match(/\b\d{4}\b/)?.[0] || '';
     const creatorValue = metadata.creator || hit.creator || '';
     const creator = (Array.isArray(creatorValue) ? creatorValue.join(', ') : String(creatorValue))
       .replace(/\s+/g, ' ').trim().slice(0, 100);
-    const url = this.directFileUrl(identifier, file.name);
+    const episodeUnit = this.episodeUnit(files);
+    const episodes = this.episodeList(identifier, files);
+    const primary = episodes[0];
+    const episodeTotal = files.total || episodes.length;
     return {
       source: this.id,
       sourceLabel: this.label,
@@ -5459,12 +5644,18 @@ const ArchiveMovies = {
       year,
       creator,
       license,
-      fileName: file.name,
-      fileSize: Number(file.size) || 0,
-      duration: 0,
-      url,
-      type: detectType(url, 'progressive'),
+      fileName: primary.fileName,
+      fileSize: primary.fileSize,
+      duration: primary.duration,
+      url: primary.url,
+      type: primary.type,
       detailsUrl: `https://archive.org/details/${encodeURIComponent(identifier)}`,
+      identifier,
+      isSeries: episodes.length > 1 && episodeUnit === 'episode',
+      episodeUnit,
+      episodes,
+      episodeCount: episodes.length,
+      episodeTotal,
     };
   },
 
@@ -5691,10 +5882,18 @@ const PeerTubeMovies = {
 const MovieSearch = {
   /** Adding a catalogue here is all it takes — the UI is built from this list. */
   sources: [ArchiveMovies, CommonsMovies, PeerTubeMovies],
+  /** The *Show* picker: how results are narrowed by what kind of title they are. */
+  kinds: [
+    { id: 'all', label: 'Movies & series', short: '' },
+    { id: 'movie', label: 'Movies only', short: 'movie' },
+    { id: 'series', label: 'Series & episodes', short: 'series' },
+  ],
   searchToken: 0,
   controller: null,
   timeoutId: null,
   lastQuery: '',
+  lastResults: [],
+  lastStatus: '',
 
   init() {
     $('#movieSearchForm').addEventListener('submit', (e) => {
@@ -5719,6 +5918,32 @@ const MovieSearch = {
         if (this.lastQuery && $('#movieSearchResults').childElementCount) this.search();
       });
     }
+
+    /* Show-picker (movies / series) — filters the hits already in hand. */
+    const kindSelect = $('#movieSearchKind');
+    if (kindSelect) {
+      kindSelect.replaceChildren(...this.kinds.map((kind) => el('option', { value: kind.id, text: kind.label })));
+      const saved = String(Settings.get('movieSearchKind') || 'all');
+      kindSelect.value = this.kinds.some((kind) => kind.id === saved) ? saved : 'all';
+      kindSelect.addEventListener('change', () => {
+        Settings.set('movieSearchKind', kindSelect.value);
+        this.renderResults();
+      });
+    }
+  },
+
+  /** The active *Show* filter: 'all' | 'movie' | 'series'. */
+  selectedKind() {
+    const select = $('#movieSearchKind');
+    const picked = this.kinds.find((kind) => kind.id === select?.value);
+    return picked ? picked.id : 'all';
+  },
+
+  /** The hits the *Show* filter lets through. */
+  visibleResults() {
+    const kind = this.selectedKind();
+    if (kind === 'all') return this.lastResults;
+    return this.lastResults.filter((item) => (kind === 'movie' ? item.kind === 'movie' : item.kind !== 'movie'));
   },
 
   /** A non-URL typed into the online-video field is a handy search prefill. */
@@ -5736,12 +5961,137 @@ const MovieSearch = {
     return picked ? [picked] : this.sources;
   },
 
+  /* ---------- movies and series: what each hit actually is ---------- */
+
+  /**
+   * Tag a hit: 'series' when the record itself holds several episodes,
+   * 'episode' when its title numbers it ("Night Court S01E05"), else 'movie'.
+   */
+  classify(item) {
+    const episodic = (item.episodes?.length || 0) > 1 && (item.episodeUnit || 'episode') === 'episode';
+    const kind = episodic ? 'series' : (MovieNet.parseEpisode(item.title) ? 'episode' : 'movie');
+    return { ...item, kind };
+  },
+
+  /**
+   * A catalogue holds many series as one item per episode — "Tales of Tomorrow
+   * – Ice from Space", "Tales of Tomorrow – The Window" … which would
+   * otherwise list as scattered files. Fold those into one series entry so a
+   * search for a show offers its whole run.
+   */
+  groupSeries(items, query) {
+    const wanted = MovieNet.seriesKey(query);
+    const buckets = new Map();
+    const firstAt = new Map();
+    items.forEach((item, index) => {
+      if (item.kind === 'series') return;
+      const split = MovieNet.splitSeriesTitle(item.title);
+      if (!split) return;
+      const key = MovieNet.seriesKey(split.series);
+      if (key.length < 3) return;
+      if (wanted && key !== wanted && !key.includes(wanted)) return;
+      if (!buckets.has(key)) { buckets.set(key, { name: split.series, items: [] }); firstAt.set(key, index); }
+      buckets.get(key).items.push(item);
+    });
+
+    const usable = new Map([...buckets].filter(([key, group]) => this.sameSeriesRun(group.items) && key));
+    if (!usable.size) return items;
+    const swallowed = new Map([...usable].map(([key, group]) => [firstAt.get(key), group]));
+    const folded = new Set([...usable.values()].flatMap((group) => group.items));
+    const out = [];
+    items.forEach((item, index) => {
+      if (swallowed.has(index)) out.push(this.seriesEntry(swallowed.get(index)));
+      else if (!folded.has(item)) out.push(item);
+    });
+    return out;
+  },
+
+  /**
+   * A shared prefix is only a series when the titles really differ (one episode
+   * listed by two catalogues is not a run) and the years agree (the 1921 and
+   * 1936 versions of a novel are two films, not a show).
+   */
+  sameSeriesRun(list) {
+    if (list.length < 2) return false;
+    if (new Set(list.map((item) => String(item.year || ''))).size > 1) return false;
+    const episodes = new Set(list.map((item) => {
+      const shown = MovieNet.episodeMarks(MovieNet.splitSeriesTitle(item.title)?.rest || item.title);
+      return `${shown.label}|${MovieNet.seriesKey(shown.title)}`;
+    }));
+    if (episodes.size < 2) return false;
+    if (list.length >= 3) return true;
+    return list.every((item) => MovieNet.parseEpisode(MovieNet.splitSeriesTitle(item.title)?.rest || item.title));
+  },
+
+  /** Build the series entry that replaces the episode items folded into it. */
+  seriesEntry(group) {
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    const seen = new Set();
+    const episodes = [];
+    group.items.forEach((item, index) => {
+      const shown = MovieNet.episodeMarks(MovieNet.splitSeriesTitle(item.title)?.rest || item.title);
+      const title = shown.title || `Episode ${index + 1}`;
+      if (seen.has(title.toLowerCase())) return;
+      seen.add(title.toLowerCase());
+      episodes.push({
+        ...shown,
+        title,
+        season: shown.season || 0,
+        episode: shown.episode || index + 1,
+        fileName: item.fileName,
+        fileSize: item.fileSize,
+        duration: item.duration,
+        url: item.url,
+        type: item.type,
+        license: item.license,
+        detailsUrl: item.detailsUrl,
+        sourceLabel: item.sourceLabel,
+      });
+    });
+    episodes.sort((a, b) => ((a.season - b.season) || (a.episode - b.episode) || collator.compare(a.title, b.title)));
+    const primary = episodes[0];
+    const [first] = group.items;
+    const sources = [...new Set(group.items.map((item) => item.sourceLabel).filter(Boolean))];
+    return {
+      ...first,
+      identifier: undefined,                   // the episodes came from separate records
+      sourceLabel: sources.length > 1 ? sources.join(' + ') : first.sourceLabel,
+      title: group.name || first.title,
+      kind: 'series',
+      isSeries: true,
+      episodeUnit: 'episode',
+      episodes,
+      episodeCount: episodes.length,
+      fileName: primary.fileName,
+      fileSize: primary.fileSize,
+      duration: primary.duration,
+      url: primary.url,
+      type: primary.type,
+      license: episodes.find((episode) => episode.license)?.license || first.license,
+      detailsUrl: primary.detailsUrl || first.detailsUrl,
+    };
+  },
+
+  /** Counts worth reporting once the hits are known, filter included. */
+  report(items, sources) {
+    const series = items.filter((item) => item.kind !== 'movie').length;
+    const movies = items.length - series;
+    const counts = sources.filter((entry) => entry.items.length)
+      .map((entry) => `${entry.source.label}: ${entry.items.length}`).join(' · ');
+    const parts = [];
+    if (movies) parts.push(`${movies} movie${movies === 1 ? '' : 's'}`);
+    if (series) parts.push(`${series} series`);
+    return `Found ${parts.join(' + ') || 'no matches'} (${counts}). Licences are uploader-declared — open a record to verify the rights.`;
+  },
+
   open({ query } = {}) {
     const field = $('#movieSearchQuery');
     const initial = String(query ?? this.queryFromUrlInput() ?? '').trim() || this.lastQuery;
     field.value = initial.slice(0, 120);
+    this.lastResults = [];
+    this.lastStatus = '';
     $('#movieSearchResults').replaceChildren();
-    this.setStatus('Enter a title to search open, directly playable catalogues.');
+    this.setStatus('Enter a movie or series title to search open, directly playable catalogues.');
     Shell.openDialog('#movieSearchDialog');
     setTimeout(() => field.focus?.(), 60);
   },
@@ -5782,7 +6132,7 @@ const MovieSearch = {
       return;
     }
     if (navigator.onLine === false) {
-      this.setStatus('You are offline — movie search needs an internet connection.', 'warn');
+      this.setStatus('You are offline — movie and series search needs an internet connection.', 'warn');
       return;
     }
 
@@ -5831,18 +6181,19 @@ const MovieSearch = {
         });
       });
 
+      this.lastResults = [];
       if (!movies.length) {
-        this.setStatus(failed.length
+        this.lastStatus = failed.length
           ? `No direct video file found — ${failed.join(', ')} could not be reached. Try again.`
-          : 'No matching openly licensed item with a direct video file was found. Try another title or spelling.');
+          : 'No matching openly licensed movie or series was found. Try another title or spelling.';
+        this.renderResults();
         return;
       }
-      this.renderResults(movies);
-      const counts = settled.filter((entry) => entry.items.length)
-        .map((entry) => `${entry.source.label}: ${entry.items.length}`).join(' · ');
-      let status = `Found ${movies.length} direct video file${movies.length === 1 ? '' : 's'} (${counts}). Licences are uploader-declared — open a record to verify the rights.`;
-      if (failed.length) status += ` ${failed.join(', ')} could not be reached.`;
-      this.setStatus(status);
+      // Movies stay movies; episodic hits become series entries with their run attached.
+      this.lastResults = this.groupSeries(movies.map((item) => this.classify(item)), query);
+      this.lastStatus = this.report(this.lastResults, settled);
+      if (failed.length) this.lastStatus += ` ${failed.join(', ')} could not be reached.`;
+      this.renderResults();
     } catch (err) {
       if (token !== this.searchToken) return;
       console.warn('[movie-search] search failed', err);
@@ -5857,35 +6208,85 @@ const MovieSearch = {
     }
   },
 
-  renderResults(movies) {
+  /** 'episode' when the files are an episode run, 'part' for a split upload. */
+  unitOf(item) {
+    return item.episodeUnit === 'part' ? 'part' : 'episode';
+  },
+
+  /** The kind tag every result carries: Movie, Episode or Series · N episodes. */
+  kindText(item) {
+    if (item.kind === 'series') {
+      const count = item.episodeCount || item.episodes?.length || 0;
+      const total = item.episodeTotal || count;
+      if (!count) return 'Series';
+      return total > count
+        ? `Series · first ${count} of ${total} episodes`
+        : `Series · ${count} episode${count === 1 ? '' : 's'}`;
+    }
+    if (item.kind === 'episode') return 'Episode';
+    const parts = item.episodes?.length || 0;
+    return parts > 1 ? `Movie · ${parts} parts` : 'Movie';
+  },
+
+  /** The status line, annotated with what the *Show* filter kept. */
+  paintStatus() {
+    const total = this.lastResults.length;
+    const short = this.kinds.find((kind) => kind.id === this.selectedKind())?.short || '';
+    if (!total || !short) { this.setStatus(this.lastStatus, total ? '' : 'warn'); return; }
+    const shown = this.visibleResults().length;
+    if (!shown) {
+      this.setStatus(`No ${short} results for “${this.lastQuery}”. Set Show to “Movies & series” to see all ${total}.`, 'warn');
+      return;
+    }
+    const plural = shown === 1 || short === 'series' ? '' : 's';
+    this.setStatus(`${this.lastStatus} Filtered to ${shown} ${short}${plural}.`);
+  },
+
+  renderResults() {
     const list = $('#movieSearchResults');
+    if (!list) return;
+    const shown = this.visibleResults();
     list.replaceChildren();
-    movies.forEach((movie) => {
+    this.paintStatus();
+    if (!this.lastResults.length || !shown.length) return;
+
+    shown.forEach((movie) => {
+      const isSeries = movie.kind === 'series';
+      const hasList = (movie.episodes?.length || 0) > 1;
+      const unit = this.unitOf(movie);
+      const word = unit === 'part' ? 'part' : 'episode';
       const title = el('a', {
         class: 'movie-result-title movie-result-link',
         href: movie.detailsUrl,
         target: '_blank',
         rel: 'noopener noreferrer',
-        text: movie.title,
+        text: isSeries && unit === 'episode' ? `${movie.title} — full series` : movie.title,
       });
       const meta = el('div', { class: 'movie-result-meta' });
+      meta.append(el('span', {
+        class: `tag kind${isSeries ? ' kind-series' : ''}${movie.kind === 'episode' ? ' kind-episode' : ''}`,
+        'data-kind': movie.kind,
+        text: this.kindText(movie),
+      }));
       if (movie.sourceLabel) meta.append(el('span', { class: 'tag source', text: movie.sourceLabel }));
       if (movie.year) meta.append(el('span', { class: 'tag', text: movie.year }));
       if (movie.creator) meta.append(el('span', { text: `by ${movie.creator}` }));
-      const extension = String(movie.fileName || '').split('.').pop().toUpperCase();
-      const mediaText = [
-        extension ? `${extension} direct file` : 'Direct file',
-        movie.duration ? fmtTime(movie.duration) : '',
-        movie.fileSize ? fmtBytes(movie.fileSize) : '',
-      ].filter(Boolean).join(' · ');
-      meta.append(el('span', { class: 'tag', text: mediaText }));
-      meta.append(el('a', {
+      if (!hasList) {
+        const extension = String(movie.fileName || '').split('.').pop().toUpperCase();
+        const mediaText = [
+          extension ? `${extension} direct file` : 'Direct file',
+          movie.duration ? fmtTime(movie.duration) : '',
+          movie.fileSize ? fmtBytes(movie.fileSize) : '',
+        ].filter(Boolean).join(' · ');
+        meta.append(el('span', { class: 'tag', text: mediaText }));
+      }
+      if (movie.license) meta.append(el('a', {
         class: 'tag license', href: movie.license.url, target: '_blank',
         rel: 'noopener noreferrer', text: movie.license.label,
       }));
       meta.append(el('a', {
         class: 'movie-result-link', href: movie.url, target: '_blank',
-        rel: 'noopener noreferrer', text: 'Open direct video',
+        rel: 'noopener noreferrer', text: hasList ? `Open ${word} 1` : 'Open direct video',
       }));
       meta.append(el('a', {
         class: 'movie-result-link', href: movie.detailsUrl, target: '_blank',
@@ -5894,30 +6295,132 @@ const MovieSearch = {
 
       const main = el('div', { class: 'movie-result-main' }, title, meta);
       const actions = el('div', { class: 'movie-result-actions' });
-      const play = el('button', { class: 'btn btn-primary', type: 'button', 'data-action': 'play', 'aria-label': `Play ${movie.title}` }, icon('i-play'), 'Play');
-      play.addEventListener('click', () => this.playMovie(movie));
-      const queue = el('button', { class: 'btn', type: 'button', 'data-action': 'queue', 'aria-label': `Queue ${movie.title}` }, icon('i-plus'), 'Queue');
-      queue.addEventListener('click', () => this.queueMovie(movie));
-      actions.append(play, queue);
-      list.append(el('li', { class: 'movie-result' }, main, actions));
+      if (hasList) {
+        const play = el('button', {
+          class: 'btn btn-primary', type: 'button', 'data-action': 'play',
+          'aria-label': `Play ${word} 1 of ${movie.title}`,
+        }, icon('i-play'), `Play ${unit === 'part' ? 'Part' : 'Ep'} 1`);
+        play.addEventListener('click', () => this.playMovie(movie, movie.episodes[0]));
+        const queue = el('button', {
+          class: 'btn', type: 'button', 'data-action': 'queue',
+          'aria-label': `Queue ${word} 1 of ${movie.title}`,
+        }, icon('i-plus'), `Queue ${unit === 'part' ? 'Part' : 'Ep'} 1`);
+        queue.addEventListener('click', () => this.queueMovie(movie, movie.episodes[0]));
+        const queueAll = el('button', {
+          class: 'btn', type: 'button', 'data-action': 'queue-all',
+          'aria-label': `Queue all ${movie.episodes.length} ${word}s of ${movie.title}`,
+        }, icon('i-list'), `Queue all (${movie.episodes.length})`);
+        queueAll.addEventListener('click', () => this.queueEpisodes(movie));
+        actions.append(play, queue, queueAll);
+      } else {
+        const play = el('button', {
+          class: 'btn btn-primary', type: 'button', 'data-action': 'play', 'aria-label': `Play ${movie.title}`,
+        }, icon('i-play'), 'Play');
+        play.addEventListener('click', () => this.playMovie(movie));
+        const queue = el('button', {
+          class: 'btn', type: 'button', 'data-action': 'queue', 'aria-label': `Queue ${movie.title}`,
+        }, icon('i-plus'), 'Queue');
+        queue.addEventListener('click', () => this.queueMovie(movie));
+        actions.append(play, queue);
+      }
+
+      const row = el('li', { class: `movie-result${isSeries ? ' is-series' : ''}` }, main, actions);
+      if (hasList) row.append(this.episodeList(movie));
+      list.append(row);
     });
   },
 
-  playlistItem(movie) {
+  /** Collapsible episode picker for a series result. */
+  episodeList(movie) {
+    const wrap = el('div', { class: 'movie-episodes-wrap' });
+    const toggle = el('button', {
+      class: 'movie-episodes-toggle', type: 'button', 'data-action': 'toggle-episodes',
+      'aria-expanded': 'false', text: `Show ${this.unitOf(movie) === 'part' ? 'parts' : 'episodes'} (${movie.episodes.length}) ▾`,
+    });
+    const list = el('ul', {
+      class: 'movie-episodes-list',
+      'aria-label': `${this.unitOf(movie) === 'part' ? 'Parts' : 'Episodes'} of ${movie.title}`,
+    });
+    list.hidden = true;
+    movie.episodes.forEach((episode) => {
+      const meta = [
+        episode.sourceLabel || '',
+        episode.label || '',
+        episode.duration ? fmtTime(episode.duration) : '',
+        episode.fileSize ? fmtBytes(episode.fileSize) : '',
+        episode.license?.label || '',
+      ].filter(Boolean).join(' · ');
+      const rowActions = el('div', { class: 'movie-episode-actions' });
+      const play = el('button', {
+        class: 'btn btn-primary', type: 'button', 'data-action': 'episode-play',
+        'aria-label': `Play ${episode.title}`,
+      }, icon('i-play'), 'Play');
+      play.addEventListener('click', () => this.playMovie(movie, episode));
+      const queue = el('button', {
+        class: 'btn', type: 'button', 'data-action': 'episode-queue',
+        'aria-label': `Queue ${episode.title}`,
+      }, icon('i-plus'), 'Queue');
+      queue.addEventListener('click', () => this.queueMovie(movie, episode));
+      rowActions.append(play, queue);
+      const heading = episode.detailsUrl
+        ? el('a', {
+          class: 'movie-episode-title movie-result-link', href: episode.detailsUrl,
+          target: '_blank', rel: 'noopener noreferrer', text: episode.title,
+        })
+        : el('div', { class: 'movie-episode-title', text: episode.title });
+      list.append(el('li', { class: 'movie-episode-item' },
+        el('div', { class: 'movie-result-main' },
+          heading,
+          el('div', { class: 'movie-episode-meta', text: meta })),
+        rowActions));
+    });
+    toggle.addEventListener('click', () => {
+      const opening = list.hidden;
+      list.hidden = !opening;
+      toggle.setAttribute('aria-expanded', String(opening));
+      const word = this.unitOf(movie) === 'part' ? 'parts' : 'episodes';
+      toggle.textContent = opening ? `Hide ${word} (${movie.episodes.length}) ▴` : `Show ${word} (${movie.episodes.length}) ▾`;
+    });
+    wrap.append(toggle, list);
+    return wrap;
+  },
+
+  playlistItem(movie, episode = null) {
     return {
-      id: uid(), kind: 'remote', title: movie.title, url: movie.url, type: movie.type,
+      id: uid(),
+      kind: 'remote',
+      title: episode ? `${movie.title} — ${episode.title}` : movie.title,
+      url: episode ? episode.url : movie.url,
+      type: (episode ? episode.type : movie.type) || detectType(episode ? episode.url : movie.url, 'progressive'),
     };
   },
 
-  queueMovie(movie) {
-    const item = this.playlistItem(movie);
+  queueMovie(movie, episode = null) {
+    const item = this.playlistItem(movie, episode);
     const alreadyQueued = Playlist.has(item);
     const entry = Playlist.add(item, { silent: true });
     Toast.show(alreadyQueued ? `Already in playlist: ${entry.title}` : `Queued: ${entry.title}`, alreadyQueued ? 'info' : 'ok', 2200);
   },
 
-  playMovie(movie) {
-    const entry = Playlist.add(this.playlistItem(movie), { silent: true });
+  /** Queue every episode a series result offers, in order. */
+  queueEpisodes(movie) {
+    const episodes = movie.episodes || [];
+    if (!episodes.length) return;
+    let added = 0;
+    episodes.forEach((episode) => {
+      const item = this.playlistItem(movie, episode);
+      if (Playlist.has(item)) return;
+      Playlist.add(item, { silent: true });
+      added += 1;
+    });
+    const word = this.unitOf(movie) === 'part' ? 'part' : 'episode';
+    Toast.show(added
+      ? `Queued ${added} ${word}${added === 1 ? '' : 's'} of ${movie.title}`
+      : `Every ${word} of ${movie.title} is already in the playlist`, 'ok', 3000);
+  },
+
+  playMovie(movie, episode = null) {
+    const entry = Playlist.add(this.playlistItem(movie, episode), { silent: true });
     this.close();
     Playlist.play(entry.id);
   },

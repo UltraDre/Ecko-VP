@@ -840,7 +840,7 @@ input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 5px var(
 .movie-search-note { margin: 0; font-size: .8rem; color: var(--text-dim); line-height: 1.5; }
 .movie-search-filter { justify-content: flex-end; font-size: .78rem; color: var(--text-dim); flex-wrap: wrap; }
 .movie-search-filter label { font-weight: 700; text-transform: uppercase; letter-spacing: .07em; }
-.movie-search-filter select { flex: 0 1 auto; width: auto; min-width: 12rem; }
+.movie-search-filter select { flex: 0 1 auto; width: auto; min-width: 10.5rem; }
 .movie-results { display: grid; gap: 8px; margin: 0; max-height: 48dvh; overflow: auto; }
 .movie-results:empty { display: none; }
 .movie-result {
@@ -861,10 +861,26 @@ input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 5px var(
 .movie-result-link { color: var(--accent-2); text-decoration: underline; text-underline-offset: 2px; }
 .movie-result-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .movie-result-actions .btn { padding: 7px 10px; font-size: .8rem; }
+.movie-result-meta .tag.kind { color: var(--accent-2); border-color: var(--accent-soft); background: var(--accent-soft); font-weight: 700; }
+.movie-result-meta .tag.kind-series,
+.movie-result-meta .tag.kind-episode { color: var(--ok); border-color: var(--ok); background: transparent; }
+.movie-result.is-series { border-color: var(--accent-soft); }
+.movie-episodes-wrap { grid-column: 1 / -1; margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.movie-episodes-toggle { font-size: .78rem; font-weight: 700; color: var(--accent-2); background: transparent; border: none; cursor: pointer; padding: 4px 0; display: inline-flex; align-items: center; gap: 4px; }
+.movie-episodes-toggle:hover { text-decoration: underline; }
+.movie-episodes-list { display: grid; gap: 4px; max-height: 200px; overflow-y: auto; margin-top: 6px; padding-right: 4px; }
+.movie-episodes-list:empty { display: none; }
+.movie-episode-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-xs); }
+.movie-episode-title { font-size: .8rem; font-weight: 600; overflow-wrap: anywhere; }
+.movie-episode-meta { font-size: .7rem; color: var(--text-mute); }
+.movie-episode-actions { display: flex; align-items: center; gap: 4px; }
+.movie-episode-actions .btn { padding: 4px 8px; font-size: .74rem; }
 
 @media (max-width: 560px) {
   .movie-result { grid-template-columns: 1fr; }
   .movie-result-actions { justify-content: flex-start; }
+  .movie-episode-item { grid-template-columns: 1fr; }
+  .movie-episode-actions { justify-content: flex-start; }
 }
 
 /* Anime search results & series episode lists */
