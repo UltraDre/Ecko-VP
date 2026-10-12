@@ -118,7 +118,7 @@ const check = (name, cond, extra = '') => {
 await wait(400); // let App.start() settle
 
 console.log('\n— boot —');
-check('app booted and logged ready', logs.info.some((l) => l.includes('Nebula Player ready')), JSON.stringify(logs.errors));
+check('app booted and logged ready', logs.info.some((l) => l.includes('Ecko VP ready')), JSON.stringify(logs.errors));
 check('no uncaught errors during boot', logs.errors.length === 0, logs.errors.join(' | '));
 check('speed grid populated (10 options)', document.querySelectorAll('#speedGrid button').length === 10,
   String(document.querySelectorAll('#speedGrid button').length));

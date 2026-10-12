@@ -1,4 +1,4 @@
-// Static sanity checks for the Nebula Player sources.
+// Static sanity checks for the Ecko VP sources.
 import fs from 'node:fs';
 
 const root = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -110,6 +110,14 @@ else fail('service worker handlers: ' + swHandlers.join(', '));
 
 /* 9. Manifest sanity */
 const manifest = JSON.parse(fs.readFileSync(`${root}/manifest.json`, 'utf8'));
+if (manifest.name !== 'Ecko VP' || manifest.short_name !== 'Ecko VP') fail('PWA name must be Ecko VP');
+else ok('PWA name is Ecko VP');
+if (!html.includes('<title>Ecko VP —')
+    || !html.includes('name="apple-mobile-web-app-title" content="Ecko VP"')
+    || !html.includes('<h1 class="brand-name">Ecko <span>VP</span></h1>')) fail('HTML branding must be Ecko VP');
+else ok('page title, Apple install name and header use Ecko VP');
+// Keep the installed app identity stable during a branding-only rename.
+if (manifest.id !== '/nebula-player/') fail('rename must preserve the existing PWA identity');
 for (const key of ['name', 'short_name', 'start_url', 'display', 'icons', 'scope']) {
   if (!manifest[key]) fail('manifest missing ' + key);
 }

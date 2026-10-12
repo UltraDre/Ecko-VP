@@ -1,5 +1,5 @@
 /* =====================================================================
- * Nebula Player — script.js
+ * Ecko VP — script.js
  * ---------------------------------------------------------------------
  * A framework-free media player with:
  *   • progressive download playback (MP4/WebM/…) + HLS (hls.js) + DASH (dash.js)
@@ -1821,8 +1821,8 @@ const MediaSession = {
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: item.title || 'Unknown title',
-        artist: item.kind === 'file' ? 'Local file' : (hostFromUrl(item.url) || 'Nebula Player'),
-        album: 'Nebula Player',
+        artist: item.kind === 'file' ? 'Local file' : (hostFromUrl(item.url) || 'Ecko VP'),
+        album: 'Ecko VP',
       });
     } catch (err) { console.warn('[mediaSession]', err); }
   },
@@ -3112,7 +3112,7 @@ const Playlist = {
     if (!this.items.length) { Toast.warn('Playlist is empty'); return; }
     const data = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), items: this.serializable() }, null, 2);
     const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
-    const a = el('a', { href: url, download: `nebula-playlist-${new Date().toISOString().slice(0, 10)}.json` });
+    const a = el('a', { href: url, download: `ecko-vp-playlist-${new Date().toISOString().slice(0, 10)}.json` });
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
     Toast.ok('Playlist exported');
@@ -7371,7 +7371,7 @@ const Shell = {
       if (!this.deferredInstall) return;
       this.deferredInstall.prompt();
       const { outcome } = await this.deferredInstall.userChoice;
-      if (outcome === 'accepted') Toast.ok('Installing Nebula Player…');
+      if (outcome === 'accepted') Toast.ok('Installing Ecko VP…');
       this.deferredInstall = null;
       $('#btnInstall').hidden = true;
     });
@@ -7603,7 +7603,7 @@ const App = {
     /* Media Session action handlers */
     MediaSession.update();
 
-    console.info('%cNebula Player ready', 'color:#7c5cff;font-weight:bold');
+    console.info('%cEcko VP ready', 'color:#7c5cff;font-weight:bold');
   },
 
   async registerServiceWorker() {
