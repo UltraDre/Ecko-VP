@@ -1,5 +1,5 @@
 /* =====================================================================
- * Nebula Player — service-worker.js
+ * Ecko VP — service-worker.js
  * ---------------------------------------------------------------------
  * Responsibilities
  *   1. App shell caching  → the UI boots with no network.
@@ -23,7 +23,7 @@
 /* ---------------------------------------------------------------------
  * Configuration
  * ------------------------------------------------------------------ */
-const VERSION = '1.0.10';
+const VERSION = '1.0.11';
 // Keep offline downloads and their index across shell-only releases. Bump this
 // separately only when the stored media/index format becomes incompatible.
 const DATA_VERSION = '1.0.6';

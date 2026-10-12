@@ -1,6 +1,6 @@
 {
-  "name": "Nebula Player — online & offline media player",
-  "short_name": "Nebula Player",
+  "name": "Ecko VP",
+  "short_name": "Ecko VP",
   "description": "Play video from the web (MP4, WebM, HLS, DASH) or from your device, download streams for offline playback, and manage a playlist with subtitles, gestures and keyboard shortcuts.",
   "id": "/nebula-player/",
   "start_url": "./index.html",

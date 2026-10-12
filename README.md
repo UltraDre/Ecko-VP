@@ -1,13 +1,21 @@
-# Nebula Player
+# Ecko VP
 
-A modern, responsive, **offline-capable media player** built with plain HTML5, CSS3 and vanilla
+Ecko VP is a modern, responsive, **offline-capable media player** built with plain HTML5, CSS3 and vanilla
 JavaScript (ES6+). It plays progressive files (MP4/WebM/…), HLS (`.m3u8`) and DASH (`.mpd`) streams,
 local files from your device, and videos you have **downloaded into the browser for offline playback**.
 
 No frameworks, no build step, no bundler — open it from any static server and it runs.
 
+### Naming & upgrade compatibility
+
+The app is named **Ecko VP** in the interface, browser tab, and installed PWA. It was previously
+called Nebula Player. Existing installations keep the same PWA identity (`/nebula-player/`), and
+internal `nebula.*` storage keys, `nebula-*` cache names, and `__nebula__` offline URLs remain
+unchanged so saved settings, playlists, resume positions, and downloaded videos survive the rename.
+The legacy identifiers in the technical examples below are intentional.
+
 <p align="center">
-  <img src="icons/icon-192.png" width="96" alt="Nebula Player icon" />
+  <img src="icons/icon-192.png" width="96" alt="Ecko VP icon" />
 </p>
 
 ---
