@@ -1851,12 +1851,16 @@ const MediaSession = {
 const Controls = {
   seeking: false,
   hideTimer: null,
+  locked: false,
+  lockVisible: false,
+  _stageLabel: null,
   rotating: false,      // serialize screen orientation requests
   orientationLocked: false,
   _stageObserver: null,
 
   init() {
     const v = Player.video;
+    this._stageLabel = $('#playerStage').getAttribute('aria-label');
 
     /* --- play / pause / nav --- */
     $('#btnPlay').addEventListener('click', () => Player.togglePlay());
@@ -1915,6 +1919,10 @@ const Controls = {
     $('#btnPip').addEventListener('click', () => this.togglePip());
     $('#btnFullscreen').addEventListener('click', () => this.toggleFullscreen());
     $('#btnDownload').addEventListener('click', () => Offline.downloadCurrent());
+    $('#btnControlsLock')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.setLocked(!this.locked);
+    });
     // Optional for older cached HTML shells.
     $('#btnRotate')?.addEventListener('click', () => this.rotateScreen());
 
@@ -2007,7 +2015,7 @@ const Controls = {
     });
   },
 
-  showBigPlay(show) { $('#bigPlay').hidden = !show; },
+  showBigPlay(show) { $('#bigPlay').hidden = !show || this.locked; },
 
   renderProgress() {
     const v = Player.video;
@@ -2158,13 +2166,48 @@ const Controls = {
   /* Chrome is toggled by a single tap — no auto-hide, no mouse-move reveal. */
   scheduleAutoHide() { clearTimeout(this.hideTimer); },
   setBarVisible(visible) {
-    $('#controlsBar').classList.toggle('is-hidden', !visible);
-    document.body.classList.toggle('controls-hidden', !visible);
+    // A locked player never reveals its chrome, including from a keyboard action.
+    const showControls = !!visible && !this.locked;
+    this.lockVisible = this.locked && !!visible;
+    const bar = $('#controlsBar');
+    bar.classList.toggle('is-hidden', !showControls);
+    bar.inert = !showControls;
+    document.body.classList.toggle('controls-hidden', !showControls);
+    $('.app-header').inert = this.locked;
+    this.renderLock();
     // Never strand a popup on screen after its anchor button is hidden.
-    if (!visible) Menus.close();
+    if (!showControls) Menus.close();
     clearTimeout(this.hideTimer);
   },
-  toggleBar() { this.setBarVisible($('#controlsBar').classList.contains('is-hidden')); },
+  toggleBar() {
+    const visible = this.locked ? !this.lockVisible : $('#controlsBar').classList.contains('is-hidden');
+    this.setBarVisible(visible);
+  },
+  setLocked(locked) {
+    this.locked = !!locked;
+    document.body.classList.toggle('controls-locked', this.locked);
+    if (this.locked) {
+      Gestures.cancelTouchGesture();
+      Shell.closePanel();
+      // Keep keyboard focus out of the chrome that is about to disappear.
+      $('#playerStage').focus({ preventScroll: true });
+    }
+    this.setBarVisible(!this.locked);
+    Player.updatePlayButton();
+  },
+  renderLock() {
+    const button = $('#btnControlsLock');
+    if (!button) return;       // an older cached shell may not have the lock yet
+    button.hidden = this.locked
+      ? !this.lockVisible
+      : $('#controlsBar').classList.contains('is-hidden');
+    button.setAttribute('aria-pressed', String(this.locked));
+    button.setAttribute('aria-label', this.locked ? 'Unlock controls' : 'Lock controls');
+    button.title = this.locked ? 'Unlock controls' : 'Lock controls and hide the interface';
+    $('#playerStage').setAttribute('aria-label', this.locked
+      ? 'Video area locked. Tap to show or hide the lock button. Tap the lock button to unlock the controls.'
+      : (this._stageLabel || 'Video area'));
+  },
 };
 
 /* =====================================================================
@@ -2284,7 +2327,7 @@ const Gestures = {
 
     /* ---------- Mouse (desktop) ---------- */
     stage.addEventListener('dblclick', (e) => {
-      if (Gestures.isInteractive(e.target)) return;
+      if (Gestures.isInteractive(e.target) || Controls.locked) return;
       e.preventDefault();
       clearTimeout(Gestures.singleTapTimer);
       Gestures.singleTapTimer = null;
@@ -2295,6 +2338,14 @@ const Gestures = {
       // Ignore clicks synthesised by touch (they follow touchend).
       if (performance.now() - Gestures.lastTouchEnd < 800) return;
       if (Gestures.isInteractive(e.target)) return;
+      if (Controls.locked) {
+        // Locked taps only peek at the lock; there is no playback double-click.
+        e.preventDefault();
+        clearTimeout(Gestures.singleTapTimer);
+        Gestures.singleTapTimer = null;
+        Gestures.handleSingleTap();
+        return;
+      }
       // Delay so a double-click can cancel the chrome toggle.
       clearTimeout(Gestures.singleTapTimer);
       Gestures.singleTapTimer = setTimeout(() => {
@@ -2312,6 +2363,7 @@ const Gestures = {
   /** A hold only makes sense with a seekable item that is actually playing. */
   canHold() {
     const v = Player.video;
+    if (Controls.locked) return false;
     if (!v || v.paused || v.ended || !Player.hasMediaSource()) return false;
     return Number.isFinite(v.duration) && v.duration > 0;   // live streams cannot be rushed
   },
@@ -2403,6 +2455,17 @@ const Gestures = {
 
     if (!this.touchGesture) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) < this.SWIPE_THRESHOLD) return;
+      if (Controls.locked) {
+        // Consume the swipe so it cannot seek, change volume, or fall through
+        // to the single-tap lock reveal when the finger lifts.
+        this.touchGesture = { axis: 'locked' };
+        this.cancelHold();
+        clearTimeout(this.singleTapTimer);
+        this.singleTapTimer = null;
+        this.lastTap.time = 0;
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
       const video = Player.video;
       this.touchGesture = {
         axis: Math.abs(dx) >= Math.abs(dy) ? 'seek' : 'volume',
@@ -2455,6 +2518,15 @@ const Gestures = {
     this.touchStart = null;
     if (this.isInteractive(e.target) || (start && this.isInteractive(start.target)) || !touch) return;
 
+    if (Controls.locked) {
+      // Every locked tap just peeks at the lock; never turn it into play/pause.
+      clearTimeout(this.singleTapTimer);
+      this.singleTapTimer = null;
+      this.lastTap.time = 0;
+      this.handleSingleTap();
+      return;
+    }
+
     const isDouble = (now - this.lastTap.time) <= this.DOUBLE_TAP_MS &&
       Math.hypot(touch.clientX - this.lastTap.x, touch.clientY - this.lastTap.y) <= this.MOVE_TOLERANCE;
 
@@ -2476,7 +2548,7 @@ const Gestures = {
 
   updateTouchGesture(clientX, clientY) {
     const gesture = this.touchGesture;
-    if (!gesture) return;
+    if (!gesture || gesture.axis === 'locked') return;
     if (gesture.axis === 'seek') {
       const video = Player.video;
       if (!Number.isFinite(video.duration) || video.duration <= 0) {
@@ -2578,11 +2650,9 @@ const Gestures = {
     // A tap that dismissed an open popup (speed/quality menu) is consumed —
     // it must not also toggle the control bar. Same for the release click/tap
     // that ends a press-and-hold fast-forward.
-    if (performance.now() - Menus.lastDismiss < 700) return;
+    if (!Controls.locked && performance.now() - Menus.lastDismiss < 700) return;
     if (performance.now() - this.holdConsumedAt < 700) return;
-    const hidden = $('#controlsBar').classList.contains('is-hidden');
-    Controls.setBarVisible(hidden);
-    if (!hidden) clearTimeout(Controls.hideTimer);
+    Controls.toggleBar();
   },
 };
 

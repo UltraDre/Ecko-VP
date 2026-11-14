@@ -49,6 +49,9 @@ The legacy identifiers in the technical examples below are intentional.
   the player area—even when the no-media screen is showing—** to bring them up, and tap again to hide
   them. The title bar and the playlist toggle follow the same show/hide so nothing shrinks or obscures
   the media.
+- **Lock the controls** with the lock icon on the left: it appears only while the full controls are
+  visible, then hides the chrome and blocks touch playback gestures. While locked, a single tap reveals
+  only the lock and another tap hides it; tap the lock itself to unlock and bring the controls back.
 - **Rotate the screen** with the ↻ button or <kbd>Shift</kbd>+<kbd>R</kbd>: switch between portrait
   and landscape with the video, controls and overlays together (supported mobile browsers).
 - Online progressive, HLS and DASH sources request ahead buffering to help reduce stalls. **Pausing does
@@ -356,6 +359,7 @@ auto-rotate enabled instead. This includes browsers that expose the API but reje
 | **Double-tap** the video area (mobile) | Play / pause (completely silent — no icon or text is shown) |
 | **Double-click** the video area (desktop) | Play / pause (completely silent — no icon or text is shown) |
 | **Single tap / click** the video area | Show / hide the control bar |
+| **Lock icon** on the left | Lock and hide the controls. While locked, tap the video to show / hide the lock; tap the lock to unlock. |
 | **Press and hold** anywhere on the video | Play at **2×** until you release, then return to your speed (a HUD shows the rate) |
 | Optional (off by default, see *Keyboard shortcuts* dialog) | Double-tap the left/right third to seek −10 s / +10 s |
 | Drag a file over the player | Shows the drop overlay; drop to add |
@@ -375,6 +379,8 @@ Notes on the implementation:
   ending a hold never shows or hides the control bar.
 - Every handler checks `event.target` first: taps on the control bar, buttons, sliders, playlist,
   URL input, dialogs or any `.card`/`.item` are **never** treated as gestures.
+- While the controls are locked, swipes, press-and-hold and double-taps are ignored; single taps only
+  show or hide the lock button. Keyboard shortcuts still work, but revealing chrome shows only the lock.
 - Page zoom is disabled everywhere (`maximum-scale=1, user-scalable=no` viewport, touch-action
   restrictions on the page and player stage, plus JS guards against pinch / Ctrl+wheel / iOS gesture events), so taps never zoom —
   including while typing in the URL field. The single-tap action is delayed by ~320 ms on touch so a
@@ -678,7 +684,7 @@ page or bypass a paywall/DRM.
 
 ## Development & tests
 
-The app itself needs **no build step and no dependencies**. Three optional harnesses live in `tests/`
+The app itself needs **no build step and no dependencies**. Optional harnesses live in `tests/`
 (Node 18+), handy when you change something:
 
 ```bash
@@ -688,6 +694,7 @@ npm install --no-save jsdom           # only for the UI test
 node tests/ui-smoke.test.mjs          # boots the real DOM and drives keyboard/gestures/playlist/sorting/movie-search/page-scan/subtitle-search
 node tests/persistence.test.mjs       # close/reopen round trips: queue, order, highlight, resume pop-up, saved local files, save-on-close
 node tests/up-next.test.mjs           # press-and-hold 2x speed + the up-next card, its countdown, its settings and shuffle honesty
+node tests/controls-lock.test.mjs     # lock/unlock chrome, locked tap cycling and gesture guards
 ```
 
 - `static-checks.mjs` cross-references every `$('#id')` in `script.js` with `index.html` — the fastest
@@ -709,6 +716,9 @@ node tests/up-next.test.mjs           # press-and-hold 2x speed + the up-next ca
   it away for the rest of the item, **Play next** loads the advertised item, the on/off switch and the
   5–180 s lead-time slider, no card for a one-item queue or the last item with looping off, and — with
   shuffle on — that the item the card names is the one that actually plays).
+- `controls-lock.test.mjs` boots the app in jsdom and checks that the lock follows the full control bar,
+  locking hides the chrome and closes open panels/menus, locked taps cycle only the lock button, unlocking
+  restores the controls, and locked swipes/holds/double-taps cannot change playback.
 - `persistence.test.mjs` boots the app *on top of* a `localStorage` state from a previous session and checks
   what comes back (queue, saved order, highlighted last title, resume position, the “continue where you
   left off” card) and that `pagehide` / hiding the tab flushes debounced writes instead of losing them.
