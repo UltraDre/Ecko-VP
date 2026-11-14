@@ -281,7 +281,9 @@ body.is-offline .net-pill .dot { background: var(--danger); box-shadow: 0 0 0 3p
 .icon-btn.lg:hover { background: var(--accent-soft); filter: brightness(1.15); }
 
 /* Icon state switching — JS sets classes on <body>/stage */
-.ic-pause, .ic-pip-off, .icon-moon, .ic-loop1, .ic-fsx, .ic-vl, .ic-vm { display: none; }
+.ic-pause, .ic-pip-off, .icon-moon, .ic-loop1, .ic-fsx, .ic-vl, .ic-vm, .ic-lock-closed { display: none; }
+body.controls-locked .ic-lock-open { display: none; }
+body.controls-locked .ic-lock-closed { display: block; }
 body.is-playing #btnPlay .ic-play { display: none; }
 body.is-playing #btnPlay .ic-pause { display: block; }
 body.is-muted #btnMute .ic-vh, body.is-vol-low #btnMute .ic-vh { display: none; }
@@ -1264,7 +1266,7 @@ kbd {
 }
 
 @media print {
-  .sidebar, .controls, .app-footer, .toasts { display: none; }
+  .sidebar, .controls, .controls-lock, .app-footer, .toasts { display: none; }
 }
 
 /* =====================================================================
@@ -1496,6 +1498,59 @@ body.is-empty.controls-hidden .app-header {
   pointer-events: auto;
 }
 
+/* Screen lock: a single left-side button follows the full chrome when unlocked.
+   Locked, it is the only control a tap can reveal; tapping it restores chrome. */
+.icon-btn.controls-lock {
+  position: absolute;
+  left: calc(clamp(12px, 2vw, 24px) + env(safe-area-inset-left));
+  top: 50%;
+  translate: 0 -50%;
+  z-index: 18;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(10, 12, 22, .78);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.icon-btn.controls-lock:hover {
+  border-color: rgba(255, 255, 255, .3);
+  background: rgba(28, 31, 40, .92);
+  color: #fff;
+}
+.icon-btn.controls-lock[aria-pressed="true"] {
+  border-color: rgba(255, 255, 255, .28);
+  background: rgba(10, 12, 22, .86);
+  color: #fff;
+}
+.icon-btn.controls-lock svg { width: 22px; height: 22px; }
+
+body.controls-locked .app-header,
+body.controls-locked .controls,
+body.controls-locked .sidebar,
+body.controls-locked .scrim,
+body.controls-locked .sheet,
+body.controls-locked .popup,
+body.controls-locked .download-bar,
+body.controls-locked .up-next,
+body.controls-locked .big-play,
+body.controls-locked .empty-state,
+body.controls-locked .error-box,
+body.controls-locked .gesture-hud,
+body.controls-locked .seek-flash,
+body.controls-locked .notices,
+body.controls-locked .toasts {
+  visibility: hidden;
+  pointer-events: none;
+}
+body.controls-locked.is-empty .app-header {
+  opacity: 0;
+  transform: translateY(-100%);
+}
+
 .download-bar {
   position: absolute;
   left: 12px;
@@ -1656,6 +1711,7 @@ textarea:focus { border-color: var(--accent); background: var(--surface); }
   .header-actions .icon-btn { width: 38px; height: 38px; }
   .stage { height: 100%; border-radius: 0; }
   .controls { width: 100%; padding: 10px 11px calc(12px + env(safe-area-inset-bottom)); border-radius: 0; }
+  .icon-btn.controls-lock { left: calc(12px + env(safe-area-inset-left)); width: 44px; height: 44px; }
   .buttons-row { gap: 4px; }
   .btn-group.secondary { gap: 0; }
   .title-strip { padding-bottom: 7px; }
